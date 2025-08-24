@@ -237,28 +237,6 @@ After deployment, contract addresses are saved in `deployments/{network}.json`:
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Open an issue on GitHub
-- Join our Discord community
-- Check the documentation
-
-## 🗺️ Roadmap
-
-- [x] Basic index fund functionality
-- [x] Factory pattern implementation
-- [x] Frontend interface
-- [ ] DEX integration for automated trading
-- [ ] Advanced rebalancing strategies
-- [ ] Governance token and DAO
-- [ ] Mobile application
-- [ ] Multi-chain support
-
 ## ⚠️ Disclaimer
 
 This software is experimental and provided "as is". Use at your own risk. Always do your own research before investing in any financial products.
