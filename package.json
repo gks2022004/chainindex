@@ -1,0 +1,55 @@
+{
+  "name": "chainindex",
+  "version": "1.0.0",
+  "description": "Onchain Index Fund DeFi Protocol",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+  "deploy:factory:localhost": "npx hardhat run scripts/deploy-factory.js --network localhost",
+  "deploy:mocks:localhost": "npx hardhat run scripts/deploy-mocks.js --network localhost",
+  "create:fund:localhost": "npx hardhat run scripts/create-fund.js --network localhost",
+  "deploy:factory:sepolia": "npx hardhat run scripts/deploy-factory.js --network sepolia",
+  "deploy:mocks:sepolia": "npx hardhat run scripts/deploy-mocks.js --network sepolia",
+  "create:fund:sepolia": "npx hardhat run scripts/create-fund.js --network sepolia",
+  "configure:dex:localhost": "npx hardhat run scripts/configure-dex.js --network localhost",
+  "configure:dex:sepolia": "npx hardhat run scripts/configure-dex.js --network sepolia",
+    "node": "npx hardhat node",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start",
+    "setup": "npm install && npm --prefix frontend install"
+  },
+  "keywords": [
+    "defi",
+    "index-fund",
+    "ethereum",
+    "solidity",
+    "hardhat"
+  ],
+  "author": "ChainIndex Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "@typechain/ethers-v6": "^0.5.0",
+    "@typechain/hardhat": "^9.0.0",
+    "@types/chai": "^4.2.0",
+    "@types/mocha": ">=9.1.0",
+    "chai": "^4.2.0",
+    "ethers": "^6.4.0",
+    "hardhat": "^2.19.0",
+    "hardhat-gas-reporter": "^1.0.8",
+    "solidity-coverage": "^0.8.1",
+    "typechain": "^8.3.0",
+    "typescript": ">=4.5.0"
+  },
+  "dependencies": {
+    "@chainlink/contracts": "^0.8.0",
+    "@openzeppelin/contracts": "4.9",
+    "@openzeppelin/contracts-upgradeable": "^5.0.0",
+    "dotenv": "^16.3.1"
+  }
+}

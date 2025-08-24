@@ -1,0 +1,10 @@
+{
+  "network": "sepolia",
+  "factory": "0xEa45BDf40ffF75F6471fb33A47eC8E788D5D502b",
+  "fundAddress": "0x0fa8c9430E4d3091C8f483D13aA7E5103ac40E9A",
+  "name": "Crypto Index",
+  "symbol": "CNDX",
+  "mgmtBps": 200,
+  "perfBps": 1000,
+  "timestamp": "2025-08-23T14:55:18.121Z"
+}

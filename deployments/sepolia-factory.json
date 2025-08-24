@@ -1,0 +1,8 @@
+{
+  "network": "sepolia",
+  "deployer": "0x3B79bda90db2AF622FB698baB594D7843E660f0e",
+  "factory": "0xEa45BDf40ffF75F6471fb33A47eC8E788D5D502b",
+  "creationFeeEther": "0.01",
+  "feeRecipient": "0x3B79bda90db2AF622FB698baB594D7843E660f0e",
+  "timestamp": "2025-08-23T14:34:40.650Z"
+}
