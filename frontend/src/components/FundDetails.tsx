@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { ethers } from 'ethers'
+import PriceChart from './PriceChart'
 
 interface FundDetailsProps {
   fundAddress: string
@@ -24,6 +25,9 @@ const fundAbi = [
   { inputs: [], name: 'feeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'owner', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'getTotalValue', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  // DEX state
+  { inputs: [], name: 'WETH', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'swapRouter', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   // Assets
   { inputs: [], name: 'assetCount', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ internalType: 'uint256', name: 'assetId', type: 'uint256' }], name: 'assets', outputs: [
@@ -36,6 +40,7 @@ const fundAbi = [
     { internalType: 'uint256', name: 'maxWeight', type: 'uint256' }
   ], stateMutability: 'view', type: 'function' },
   { inputs: [{ internalType: 'uint256', name: 'assetId', type: 'uint256' }], name: 'getAssetPrice', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ internalType: 'address', name: 'token', type: 'address' }], name: 'poolFee', outputs: [{ type: 'uint24' }], stateMutability: 'view', type: 'function' },
   // Core actions
   { inputs: [], name: 'deposit', outputs: [], stateMutability: 'payable', type: 'function' },
   { inputs: [{ internalType: 'uint256', name: 'shares', type: 'uint256' }], name: 'withdraw', outputs: [], stateMutability: 'nonpayable', type: 'function' },
@@ -108,6 +113,10 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
   const { address, isConnected } = useAccount()
   const [router, setRouter] = useState('')
   const [weth, setWeth] = useState('')
+  const [chainRouter, setChainRouter] = useState<string>('')
+  const [chainWeth, setChainWeth] = useState<string>('')
+  const [dexConfigured, setDexConfigured] = useState<boolean>(false)
+  const [editDex, setEditDex] = useState<boolean>(false)
   const [poolToken, setPoolToken] = useState('')
   const [poolFee, setPoolFeeVal] = useState<number>(3000)
   const [loading, setLoading] = useState(false)
@@ -149,8 +158,8 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
     try {
       setLoading(true)
       const c = await getContract(false)
-      const [nm, sym, tvlVal, ts, mf, pf, pausedVal, minI, th, fr, ownr] = await Promise.all([
-        c.name(), c.symbol(), c.getTotalValue(), c.totalSupply(), c.managementFee(), c.performanceFee(), c.isPaused(), c.minInvestment(), c.rebalanceThreshold(), c.feeRecipient(), c.owner()
+      const [nm, sym, tvlVal, ts, mf, pf, pausedVal, minI, th, fr, ownr, wAddr, rAddr] = await Promise.all([
+        c.name(), c.symbol(), c.getTotalValue(), c.totalSupply(), c.managementFee(), c.performanceFee(), c.isPaused(), c.minInvestment(), c.rebalanceThreshold(), c.feeRecipient(), c.owner(), c.WETH(), c.swapRouter()
       ])
       setFundName(nm)
       setFundSymbol(sym)
@@ -163,6 +172,15 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
       setThreshold(Number(th))
       setFeeRecipient(fr)
       setOwner(ownr)
+      setChainWeth(wAddr)
+      setChainRouter(rAddr)
+      const configured = !!wAddr && wAddr !== '0x0000000000000000000000000000000000000000' && !!rAddr && rAddr !== '0x0000000000000000000000000000000000000000'
+      setDexConfigured(configured)
+      // Pre-fill inputs from on-chain if present
+      if (configured) {
+        if (!weth) setWeth(wAddr)
+        if (!router) setRouter(rAddr)
+      }
       if (address) {
         const bal: bigint = await c.balanceOf(address)
         setUserShares(bal)
@@ -175,7 +193,11 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
       for (let i = 0n; i < count; i++) {
         const a = await c.assets(i)
         const price: bigint = await c.getAssetPrice(i)
-        arr.push({ id: i, ...a, price })
+        let fee: number | null = null
+        try {
+          fee = Number(await c.poolFee(a.tokenAddress))
+        } catch {}
+        arr.push({ id: i, ...a, price, poolFee: fee })
       }
       setAssets(arr)
     } catch (e) {
@@ -365,6 +387,9 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
           <div className="text-xs text-gray-500 dark:text-gray-400">Status: {paused ? 'Paused' : 'Active'}</div>
         </div>
 
+  {/* Live Chart */}
+  <PriceChart fundAddress={fundAddress} />
+
         {/* Invest / Withdraw */}
         <section className="border rounded-lg p-4 dark:border-gray-700">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Invest / Withdraw</h2>
@@ -394,27 +419,40 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
         {/* DEX Configuration */}
         <section className="border rounded-lg p-4 dark:border-gray-700">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">DEX Configuration</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input
-              className="w-full rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
-              placeholder="Uniswap V3 Router address"
-              value={router}
-              onChange={(e) => setRouter(e.target.value)}
-            />
-            <input
-              className="w-full rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
-              placeholder="WETH address"
-              value={weth}
-              onChange={(e) => setWeth(e.target.value)}
-            />
-          </div>
-          <button
-            onClick={onConfigureDEX}
-            disabled={!isConnected || loading || !router || !weth}
-            className="mt-3 inline-flex items-center px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
-          >
-            Configure DEX
-          </button>
+          {dexConfigured && !editDex ? (
+            <div className="space-y-2">
+              <div className="text-sm text-gray-400">Configured</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input className="w-full rounded border px-3 py-2 bg-gray-100 dark:bg-gray-900 dark:border-gray-700" value={chainRouter} readOnly />
+                <input className="w-full rounded border px-3 py-2 bg-gray-100 dark:bg-gray-900 dark:border-gray-700" value={chainWeth} readOnly />
+              </div>
+              <button onClick={() => setEditDex(true)} className="mt-3 inline-flex items-center px-4 py-2 rounded bg-gray-600 text-white hover:bg-gray-700">Reconfigure</button>
+            </div>
+          ) : (
+            <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input
+                  className="w-full rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                  placeholder="Uniswap V3 Router address"
+                  value={router}
+                  onChange={(e) => setRouter(e.target.value)}
+                />
+                <input
+                  className="w-full rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                  placeholder="WETH address"
+                  value={weth}
+                  onChange={(e) => setWeth(e.target.value)}
+                />
+              </div>
+              <button
+                onClick={async () => { await onConfigureDEX(); setEditDex(false); await refresh(); }}
+                disabled={!isConnected || loading || !router || !weth}
+                className="mt-3 inline-flex items-center px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {dexConfigured ? 'Save DEX Config' : 'Configure DEX'}
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Pool Fee */}
@@ -510,6 +548,7 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
                     <th className="py-2 pr-4">Target</th>
                     <th className="py-2 pr-4">Current</th>
                     <th className="py-2 pr-4">Active</th>
+                    <th className="py-2 pr-4">Pool Fee</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -520,6 +559,7 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
                       <td className="py-2 pr-4">{Number(a.targetWeight) / 100}%</td>
                       <td className="py-2 pr-4">{Number(a.currentWeight) / 100}%</td>
                       <td className="py-2 pr-4">{a.isActive ? 'Yes' : 'No'}</td>
+                      <td className="py-2 pr-4">{a.poolFee != null ? a.poolFee : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

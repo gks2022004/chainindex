@@ -13,6 +13,8 @@
   "create:fund:sepolia": "npx hardhat run scripts/create-fund.js --network sepolia",
   "configure:dex:localhost": "npx hardhat run scripts/configure-dex.js --network localhost",
   "configure:dex:sepolia": "npx hardhat run scripts/configure-dex.js --network sepolia",
+  "add:assets:localhost": "npx hardhat run scripts/add-assets.js --network localhost",
+  "add:assets:sepolia": "npx hardhat run scripts/add-assets.js --network sepolia",
     "node": "npx hardhat node",
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",

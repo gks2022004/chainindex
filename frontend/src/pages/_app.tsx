@@ -25,9 +25,10 @@ const { chains, publicClient, webSocketPublicClient } = configureChains(
 )
 
 const wcId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+const isValidWcId = typeof wcId === 'string' && /^[a-z0-9]{32,}$/i.test(wcId)
 let connectors
-if (wcId) {
-  const res = getDefaultWallets({ appName: 'ChainIndex', projectId: wcId, chains })
+if (isValidWcId) {
+  const res = getDefaultWallets({ appName: 'ChainIndex', projectId: wcId as string, chains })
   connectors = res.connectors
 } else {
   // Fallback to injected-only connectors when no WalletConnect project ID is provided
