@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { ethers } from 'ethers'
 import PriceChart from './PriceChart'
+import { useCallback } from 'react'
 
 interface FundDetailsProps {
   fundAddress: string
@@ -97,6 +98,20 @@ const fundAbi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Admin: add assets
+  {
+    inputs: [
+      { internalType: 'address', name: 'token', type: 'address' },
+      { internalType: 'address', name: 'priceFeed', type: 'address' },
+      { internalType: 'uint256', name: 'targetWeight', type: 'uint256' },
+      { internalType: 'uint256', name: 'minWeight', type: 'uint256' },
+      { internalType: 'uint256', name: 'maxWeight', type: 'uint256' },
+    ],
+    name: 'addAsset',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ]
 
 type Suggestion = {
@@ -135,8 +150,16 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
   const [feeRecipient, setFeeRecipient] = useState<string>('')
   const [owner, setOwner] = useState<string>('')
   const [assets, setAssets] = useState<any[]>([])
+  const [tokenMeta, setTokenMeta] = useState<Record<string, { symbol?: string; name?: string }>>({})
   const [depositEth, setDepositEth] = useState('')
   const [withdrawShares, setWithdrawShares] = useState('')
+  const [assetToken, setAssetToken] = useState('')
+  const [assetFeed, setAssetFeed] = useState('')
+  const [assetTargetBps, setAssetTargetBps] = useState<number>(0)
+  const [assetMinBps, setAssetMinBps] = useState<number>(0)
+  const [assetMaxBps, setAssetMaxBps] = useState<number>(0)
+  const [catalog, setCatalog] = useState<any[]>([])
+  const [addingFromCatalog, setAddingFromCatalog] = useState<string>('')
 
   const getContract = async (withSigner = false) => {
     if (typeof window === 'undefined') throw new Error('Window not available')
@@ -188,7 +211,7 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
         setUserShares(null)
       }
       // Load assets
-      const count: bigint = await c.assetCount()
+  const count: bigint = await c.assetCount()
       const arr: any[] = []
       for (let i = 0n; i < count; i++) {
         const a = await c.assets(i)
@@ -197,9 +220,41 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
         try {
           fee = Number(await c.poolFee(a.tokenAddress))
         } catch {}
-        arr.push({ id: i, ...a, price, poolFee: fee })
+        // IMPORTANT: ethers v6 returns array-like structs; named fields may be non-enumerable.
+        // Avoid spreading `a` directly, which would drop named props. Map explicitly.
+        arr.push({
+          id: Number(i),
+          tokenAddress: a.tokenAddress,
+          priceFeed: a.priceFeed,
+          targetWeight: a.targetWeight,
+          currentWeight: a.currentWeight,
+          isActive: a.isActive,
+          minWeight: a.minWeight,
+          maxWeight: a.maxWeight,
+          price,
+          poolFee: fee,
+        })
       }
       setAssets(arr)
+      // kick off symbol lookups lazily
+      try {
+        const provider = new ethers.BrowserProvider((window as any).ethereum)
+        const erc20Abi = [
+          { inputs: [], name: 'symbol', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+          { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+        ]
+        const metas: Record<string, { symbol?: string; name?: string }> = {}
+        await Promise.all(arr.map(async (it) => {
+          try {
+            const c20 = new ethers.Contract(it.tokenAddress, erc20Abi, provider)
+            const [sym, nm] = await Promise.all([c20.symbol(), c20.name()])
+            metas[it.tokenAddress] = { symbol: sym, name: nm }
+          } catch {
+            metas[it.tokenAddress] = {}
+          }
+        }))
+        setTokenMeta((prev) => ({ ...prev, ...metas }))
+      } catch {}
     } catch (e) {
       console.error('refresh failed', e)
     } finally {
@@ -211,6 +266,14 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fundAddress, address])
+
+  // Load asset catalog from API (derived from deployments/*-mocks.json)
+  useEffect(() => {
+    fetch('/api/catalog')
+      .then((r) => r.json())
+      .then((j) => setCatalog(Array.isArray(j.assets) ? j.assets : []))
+      .catch(() => setCatalog([]))
+  }, [])
 
   // Pre-fill router/WETH from env if provided
   useEffect(() => {
@@ -350,7 +413,67 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
     }
   }
 
-  const fmtPct = (bps: bigint) => `${Number(bps) / 100}%`
+  const onAddAsset = async () => {
+    try {
+      if (!assetToken || !assetFeed) return
+      setLoading(true)
+      setTxStatus('Adding asset...')
+      const c = await getContract(true)
+      // Expect basis points (e.g., 5000 = 50%)
+      const tx = await c.addAsset(
+        assetToken,
+        assetFeed,
+        BigInt(assetTargetBps),
+        BigInt(assetMinBps),
+        BigInt(assetMaxBps)
+      )
+      await tx.wait()
+      setAssetToken(''); setAssetFeed('')
+      setAssetTargetBps(0); setAssetMinBps(0); setAssetMaxBps(0)
+      await refresh()
+      setTxStatus('Asset added')
+    } catch (e: any) {
+      setTxStatus(e?.message || 'Add asset failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const addCatalogItem = useCallback(async (item: any) => {
+    try {
+      setAddingFromCatalog(item.symbol)
+      setLoading(true)
+      setTxStatus(`Adding ${item.symbol}...`)
+      const c = await getContract(true)
+      const tx = await c.addAsset(
+        item.token,
+        item.feed,
+        BigInt(item.defaultTargetBps),
+        BigInt(item.defaultMinBps),
+        BigInt(item.defaultMaxBps)
+      )
+      await tx.wait()
+      // Optionally set default pool fee
+      try {
+        const tx2 = await c.setPoolFee(item.token, item.defaultFee)
+        await tx2.wait()
+      } catch {}
+      await refresh()
+      setTxStatus(`${item.symbol} added`)
+    } catch (e: any) {
+      setTxStatus(e?.message || `Failed to add ${item?.symbol || 'asset'}`)
+    } finally {
+      setLoading(false)
+      setAddingFromCatalog('')
+    }
+  }, [])
+
+  const fmtPct = (bps: any) => {
+    if (bps === null || bps === undefined) return '—'
+    const n = typeof bps === 'bigint' ? Number(bps) : Number(bps)
+    if (!Number.isFinite(n)) return '—'
+    return `${(n / 100).toFixed(2)}%`
+  }
   const fmtAmount = (v: bigint) => ethers.formatEther(v)
 
   const sharePrice = useMemo(() => {
@@ -554,7 +677,7 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
                 <tbody>
                   {assets.map((a: any, i: number) => (
                     <tr key={i} className="border-t dark:border-gray-700">
-                      <td className="py-2 pr-4 font-mono">{a.tokenAddress}</td>
+                      <td className="py-2 pr-4 font-mono">{tokenMeta[a.tokenAddress]?.symbol || a.tokenAddress}</td>
                       <td className="py-2 pr-4">{ethers.formatEther(a.price)}</td>
                       <td className="py-2 pr-4">{Number(a.targetWeight) / 100}%</td>
                       <td className="py-2 pr-4">{Number(a.currentWeight) / 100}%</td>
@@ -567,6 +690,67 @@ export default function FundDetails({ fundAddress, onBack }: FundDetailsProps) {
             </div>
           )}
         </section>
+
+        {/* Add Asset (Owner) */}
+        <section className="border rounded-lg p-4 dark:border-gray-700">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Add Asset (Owner)</h2>
+          {isOwner ? (
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <input className="rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                     placeholder="Token address" value={assetToken} onChange={(e)=>setAssetToken(e.target.value)} />
+              <input className="rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                     placeholder="Chainlink price feed" value={assetFeed} onChange={(e)=>setAssetFeed(e.target.value)} />
+              <input className="rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                     placeholder="Target bps (e.g., 5000)" type="number"
+                     value={assetTargetBps} onChange={(e)=>setAssetTargetBps(Number(e.target.value))} />
+              <input className="rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                     placeholder="Min bps" type="number"
+                     value={assetMinBps} onChange={(e)=>setAssetMinBps(Number(e.target.value))} />
+              <input className="rounded border px-3 py-2 bg-white dark:bg-gray-900 dark:border-gray-700"
+                     placeholder="Max bps" type="number"
+                     value={assetMaxBps} onChange={(e)=>setAssetMaxBps(Number(e.target.value))} />
+              <div className="md:col-span-5">
+                <button onClick={onAddAsset} disabled={!isConnected || loading || !assetToken || !assetFeed}
+                        className="inline-flex items-center px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                  Add Asset
+                </button>
+                <p className="text-xs text-gray-500 mt-2">
+                  Tip: Total target weights across active assets should sum to 10000 bps (100%).
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500">Owner-only configuration</div>
+          )}
+        </section>
+
+        {/* Quick Add from Catalog (Owner) */}
+        {isOwner && (
+          <section className="border rounded-lg p-4 dark:border-gray-700">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Quick Add from Catalog</h2>
+            {catalog.length === 0 ? (
+              <div className="text-sm text-gray-500">No catalog items found.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {catalog.map((it: any) => (
+                  <div key={it.symbol} className="border rounded p-3 dark:border-gray-700">
+                    <div className="font-semibold">{it.symbol}</div>
+                    <div className="text-xs text-gray-500 break-all">Token: {it.token}</div>
+                    <div className="text-xs text-gray-500 break-all">Feed: {it.feed}</div>
+                    <div className="text-xs text-gray-500">Default: {it.defaultTargetBps/100}% (min {it.defaultMinBps/100}% / max {it.defaultMaxBps/100}%)</div>
+                    <button
+                      onClick={() => addCatalogItem(it)}
+                      disabled={!isConnected || loading || addingFromCatalog === it.symbol}
+                      className="mt-2 inline-flex items-center px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {addingFromCatalog === it.symbol ? 'Adding...' : `Add ${it.symbol}`}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {txStatus && (
           <div className="text-sm text-gray-700 dark:text-gray-300">{txStatus}</div>
